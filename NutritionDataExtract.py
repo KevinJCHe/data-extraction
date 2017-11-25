@@ -4,23 +4,23 @@
 @author: Kevin He
 
 Description: Extracts nutrition data from USDA Food Composition Databases using NDB API. Process the raw data 
-				and store it into databse file.
+                and store it into databse file.
 
 Nutrient identification numbers:
 
-Calorie (kcal) - Energy:								208		
-Total Fat - Total lipid (fat) : 						204
-Saturated Fat - Fatty acids, total saturated: 			606
-Cholestrol - Cholestrol: 								601 
-Sodium - Sodium, Na: 									307
-Total CarboHydrate - Carbohydrate, by difference: 		205
-Dietary Fibre - Fiber, total dietary: 					291
-Sugar - Sugars, total:									269
-Protein - Protein										203
-Vitamin A - Vitamin A, IU (International Units): 		318
-Vitamin C - Vitamin C, total ascorbic acids:			401
-Calcium - Calcium, Ca:									301
-Iron - Iron, Fe:										303
+Calorie (kcal) - Energy:                                208		
+Total Fat - Total lipid (fat) :                         204
+Saturated Fat - Fatty acids, total saturated:           606
+Cholestrol - Cholestrol:                                601 
+Sodium - Sodium, Na:                                    307
+Total CarboHydrate - Carbohydrate, by difference:       205
+Dietary Fibre - Fiber, total dietary:                   291
+Sugar - Sugars, total:                                  269
+Protein - Protein:                                      203
+Vitamin A - Vitamin A, IU (International Units):        318
+Vitamin C - Vitamin C, total ascorbic acids:            401
+Calcium - Calcium, Ca:                                  301
+Iron - Iron, Fe:                                        303
 '''
 
 from string import digits
@@ -53,58 +53,58 @@ def get_soup(url,header):
 
 def process_data(cursor):
 
-	#The variable that stores the list of 2-dimensional tuples (ingredient name, original ingredient raw data)
-	queries = []
+    #The variable that stores the list of 2-dimensional tuples (ingredient name, original ingredient raw data)
+    queries = []
 
-	word_amount =['lb','lbs','pound','pounds','oz','ounce','ounces','kg',
-					'cm','inch',
-					'ml','liters','gallon','gallons','quart','quarts','qt','can','cans','pot','pots','cup','cups',
-					'tablespoon','tablespoons','tbsp','teaspoon','teaspoons','tsp']
+    word_amount =['lb','lbs','pound','pounds','oz','ounce','ounces','kg',
+                    'cm','inch',
+                    'ml','liters','gallon','gallons','quart','quarts','qt','can','cans','pot','pots','cup','cups',
+                    'tablespoon','tablespoons','tbsp','teaspoon','teaspoons','tsp']
 
-	word_desc = ['hot','cold','warm','room temperature', 
-					'large','big','medium','small','weight', 
-					'round','cube','thin','thinly','halved','halves','whole',
-					'cut','turn','raw','fluid','clear','regular',
-					'one','envelope','pack','package','container','block','tub','bag','jar','heap','loaf','bottle','piece','portion',
-					'heaping',
-					'toast','smoke','roast','poach','melt',
-					'stalk','sprig','stick','clove','ear','leaves','bunch','cluster','bouquet','head','knob','nub','zest',
-					'scant','pinch','dash','topping','dusting','garnish','splash','slice','dice','strip','chunk','fillet',
-					'chop','beaten','shred','crush','mince','torn','grate','peel','sliver','julien','crumble','pit',
-					'ripe','fresh','fine','good','tasting','high','quality','leftover','inexpensive','new','year','aged','homemade',
-					'plus','semi','very','plenty','few','couple','additional','optional','lot','handful','bite-size','thumb-size','extra',
-					'each','of','up','to','in','if','as','into','for','from','more','the','other','your',
-					'serve','needed','taste','choice','favorite','percent',
-					'thinning','skinless','boneless','free-range','higher-welfare']
+    word_desc = ['hot','cold','warm','room temperature', 
+                    'large','big','medium','small','weight', 
+                    'round','cube','thin','thinly','halved','halves','whole',
+                    'cut','turn','raw','fluid','clear','regular',
+                    'one','envelope','pack','package','container','block','tub','bag','jar','heap','loaf','bottle','piece','portion',
+                    'heaping',
+                    'toast','smoke','roast','poach','melt',
+                    'stalk','sprig','stick','clove','ear','leaves','bunch','cluster','bouquet','head','knob','nub','zest',
+                    'scant','pinch','dash','topping','dusting','garnish','splash','slice','dice','strip','chunk','fillet',
+                    'chop','beaten','shred','crush','mince','torn','grate','peel','sliver','julien','crumble','pit',
+                    'ripe','fresh','fine','good','tasting','high','quality','leftover','inexpensive','new','year','aged','homemade',
+                    'plus','semi','very','plenty','few','couple','additional','optional','lot','handful','bite-size','thumb-size','extra',
+                    'each','of','up','to','in','if','as','into','for','from','more','the','other','your',
+                    'serve','needed','taste','choice','favorite','percent',
+                    'thinning','skinless','boneless','free-range','higher-welfare']
 	
-	get_rid = ["and ","ml ","or ","to ","an ","with "]
+    get_rid = ["and ","ml ","or ","to ","an ","with "]
 
-	for row in cursor:
-		#store the long listing of ingredients into a list of single-item ingredient (need to convert row (tuple) to string)
-		ing_list = str(row).replace("(u'", "").replace("',)", "").replace('(u"', '').replace('",)', '').split(' + ')
+    for row in cursor:
+        #store the long listing of ingredients into a list of single-item ingredient (need to convert row (tuple) to string)
+        ing_list = str(row).replace("(u'", "").replace("',)", "").replace('(u"', '').replace('",)', '').split(' + ')
 
-		for ingr in ing_list:
-			ing = ingr.lower()
+        for ingr in ing_list:
+            ing = ingr.lower()
 			
-			#Skip if line starts with 'For the Salad', 'Sauce:', 'Dressing:', etc
-			if (ing.find("for the ") == 0) or (ing.find(":") == len(ing)):
-				continue
+            #Skip if line starts with 'For the Salad', 'Sauce:', 'Dressing:', etc
+            if (ing.find("for the ") == 0) or (ing.find(":") == len(ing)):
+                continue
 
-			if "xf1" in ing:
-				ing = re.sub("xf1", "n", ing)			#Replace ñ (xf1) with n
-			if "&frac" in ing:
-				num = ing[ing.find("&frac")+5]
-				den = ing[ing.find("&frac")+6]			#Remove &frac (&frac12 = 1/2)
-				fraction = num + "/" + den
-				ing = re.sub("&frac" + num + den, " " + fraction + " ", ing)
-			if "&#8532" in ing:
-				ing = re.sub("&#8532", " 2/3 ", ing)	#Remove &nbsp (&#8532 = " 2/3")
-			if "&nbsp" in ing:
-				ing = re.sub("&nbsp", "", ing)			#Remove &nbsp (&nbsp = " ")
+            if "xf1" in ing:
+                ing = re.sub("xf1", "n", ing)           #Replace ñ (xf1) with n
+            if "&frac" in ing:
+                num = ing[ing.find("&frac")+5]
+                den = ing[ing.find("&frac")+6]          #Remove &frac (&frac12 = 1/2)
+                fraction = num + "/" + den
+                ing = re.sub("&frac" + num + den, " " + fraction + " ", ing)
+            if "&#8532" in ing:
+                ing = re.sub("&#8532", " 2/3 ", ing)    #Remove &nbsp (&#8532 = " 2/3")
+            if "&nbsp" in ing:
+                ing = re.sub("&nbsp", "", ing)          #Remove &nbsp (&nbsp = " ")
 			
-			ing = ing.strip("-").strip()				#Remove extra spacing and hyphen in front/back of ing. Strip spacing after!!
-			ing = " " + ing + " " + " "					#Add spacing at end for convenience & consistency
-			ing = re.sub("[\(\[].*?[\)\]]", "", ing)	#Remove words inside () [] brackets
+			ing = ing.strip("-").strip()                #Remove extra spacing and hyphen in front/back of ing. Strip spacing after!!
+			ing = " " + ing + " " + " "                 #Add spacing at end for convenience & consistency
+			ing = re.sub("[\(\[].*?[\)\]]", "", ing)    #Remove words inside () [] brackets
 
 			#Remove words that come before a colon :
 			if ': ' in ing:
