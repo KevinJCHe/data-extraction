@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 
-#Nutrient Reports -- obtain reports for foods by one or more nutrients
 '''
-Example for cheddar cheese:
-https://api.nal.usda.gov/ndb/nutrients/?format=json&api_key=DEMO_KEY&nutrients=205&nutrients=204&nutrients=208&nutrients=269&ndbno=01009
+@author: Kevin He
 
-Nutrient you want info of:
+Description: Extracts nutrition data from USDA Food Composition Databases using NDB API. Process the raw data 
+				and store it into databse file.
+
+Nutrient identification numbers:
 
 Calorie (kcal) - Energy:								208		
 Total Fat - Total lipid (fat) : 						204
@@ -21,7 +22,6 @@ Vitamin C - Vitamin C, total ascorbic acids:			401
 Calcium - Calcium, Ca:									301
 Iron - Iron, Fe:										303
 '''
-
 
 from string import digits
 from string import maketrans
@@ -51,7 +51,11 @@ max_iteration = 60
 def get_soup(url,header):
     return BeautifulSoup(urllib2.urlopen(urllib2.Request(url,headers=header)),'html.parser')
 
-def get_ingr_from_db():
+def process_data(cursor):
+
+	#The variable that stores the list of 2-dimensional tuples (ingredient name, original ingredient raw data)
+	queries = []
+
 	word_amount =['lb','lbs','pound','pounds','oz','ounce','ounces','kg',
 					'cm','inch',
 					'ml','liters','gallon','gallons','quart','quarts','qt','can','cans','pot','pots','cup','cups',
@@ -72,19 +76,18 @@ def get_ingr_from_db():
 					'each','of','up','to','in','if','as','into','for','from','more','the','other','your',
 					'serve','needed','taste','choice','favorite','percent',
 					'thinning','skinless','boneless','free-range','higher-welfare']
-	queries = []
-
-	#Retrieve ingredients from database
-	conn = sqlite3.connect('recipe.db')
-	cursor = conn.execute("SELECT recipe_ingredient from RECIPE")
+	
+	get_rid = ["and ","ml ","or ","to ","an ","with "]
 
 	for row in cursor:
-		ing_list = str(row).replace("(u'", "").replace("',)", "").replace('(u"', '').replace('",)', '').split(' + ')	#row is tuple, need to convert to string
+		#store the long listing of ingredients into a list of single-item ingredient (need to convert row (tuple) to string)
+		ing_list = str(row).replace("(u'", "").replace("',)", "").replace('(u"', '').replace('",)', '').split(' + ')
 
 		for ingr in ing_list:
 			ing = ingr.lower()
 			
-			if (ing.find("for the ") == 0) or (ing.find(":") == len(ing)):	#For the Salad, Sauce:, Dressing:, etc
+			#Skip if line starts with 'For the Salad', 'Sauce:', 'Dressing:', etc
+			if (ing.find("for the ") == 0) or (ing.find(":") == len(ing)):
 				continue
 
 			if "xf1" in ing:
@@ -99,21 +102,26 @@ def get_ingr_from_db():
 			if "&nbsp" in ing:
 				ing = re.sub("&nbsp", "", ing)			#Remove &nbsp (&nbsp = " ")
 			
-			ing = ing.strip("-").strip()				#Remove extra spacing and hyphen in front/back of word. Strip spacing after!!
+			ing = ing.strip("-").strip()				#Remove extra spacing and hyphen in front/back of ing. Strip spacing after!!
 			ing = " " + ing + " " + " "					#Add spacing at end for convenience & consistency
 			ing = re.sub("[\(\[].*?[\)\]]", "", ing)	#Remove words inside () [] brackets
 
+			#Remove words that come before a colon :
 			if ': ' in ing:
-				ing = " " + ing.split(': ', 1)[1]							#Remove words that come before a colon :
+				ing = " " + ing.split(': ', 1)[1]	
+			#Remove words that come after a period . A character must come before the period (Exception: oz. lb.)					
 			if '. ' in ing and ing[ing.find(". ")-1] != ' ':	
 				if (ing[ing.find(". ")-1] != 'z' and ing[ing.find(". ")-2] != 'o'):
-					if (ing[ing.find(". ")-1] != 'b' and ing[ing.find(". ")-2] != '1'):
-						ing = ing.split('. ', 1)[0]	+ " " + " "			#Remove words that come after a period . A character must come before the period (Exception: oz. lb.)
+					if (ing[ing.find(". ")-1] != 'b' and ing[ing.find(". ")-2] != 'l'):
+						ing = ing.split('. ', 1)[0]	+ " " + " "		
+			#Remove words that come after ' from a '
 			if ' from a ' in ing:
-				ing = ing.split(' from a ', 1)[0] + " " + " "		#Remove words that come after ' from a '
+				ing = ing.split(' from a ', 1)[0] + " " + " "
+			#Remove words that come after a hyphen - (Exception: 1 - 2 pounds of ...)	
 			if ' - ' in ing and not ing[ing.find(" - ")-1].isdigit():
-				ing = ing.split(' - ', 1)[0] + " " + " "		#Remove words that come after a hyphen - (Exception: 1 - 2 pounds of ...)
+				ing = ing.split(' - ', 1)[0] + " " + " "
 			
+			#Remove any words in the word_amount list
 			if any(x in ing for x in word_amount):	
 				wa = (s for s in word_amount if s in ing) 
 				for s in wa:
@@ -124,13 +132,14 @@ def get_ingr_from_db():
 					elif ing[(ing.find(s) + len(s))] == ".":		#e.g. 2 ounces, weight
 						ing = re.sub(' ' + s + '.' + ' ', ' ', ing) #Remove amount words WITH PERIOD IN FRONT,
 					else:
-						ing = re.sub(' ' + s + ' ', ' ', ing) 	#Remove amount words
+						ing = re.sub(' ' + s + ' ', ' ', ing) 		#Remove amount words
 
+			#Remove any words in the word_desc list
 			if any(x in ing for x in word_desc):
 				wd = (t for t in word_desc if t in ing) 
 				for t in wd:
 					if ing[(ing.find(t) - 1)] == " ":		#For efficiency
-						if ing[(ing.find(t) + len(t))] != " ":		#if end of word is not a space
+						if ing[(ing.find(t) + len(t))] != " ":		#if end of ing is not a space
 							if ing[(ing.find(t) + len(t))] == "d":
 								if ing[(ing.find(t) + len(t) + 1)] == " ":			#e.g. slice'd'
 									ing = re.sub(' ' + t + 'd ', ' ', ing) 			#Remove desc words WITH D IN FRONT
@@ -179,32 +188,39 @@ def get_ingr_from_db():
 						else:
 							ing = re.sub(' ' + t + ' ', ' ', ing) 			#Remove description words 
 
+			#Remove words that come after a comma ,
 			if ', ' in ing:
-				ing = ing.split(', ', 1)[0] + " " + " "				#Remove words that come after a comma ,
+				ing = ing.split(', ', 1)[0] + " " + " "		
+			#Remove //n at the end		
 			if ing.endswith(r'\n' + " " + " "):
-				ing = ing[:-4]							#Remove that //n at the end
+				ing = ing[:-4]							
 			ing = re.sub("[_%/,;()'*~\"+]", '', ing)	#Remove extraneous characters
 			ing = ing.translate(None, digits)			#Remove digits	
 			ing = ing.replace(".", "")					#Remove period cuz re.sub is being stupid
 			ing = ing.replace("\\", "")					#Remove / from string
-			ing = ing.strip().strip("-").strip()		#Remove extra spacing and hyphen in front/back of word. Strip spacing FIRST!!
+			ing = ing.strip().strip("-").strip()		#Remove extra spacing and hyphen in front/back of ing. Strip spacing FIRST!!
 
+			#Remove single characters if it appears in very front of ing
 			if len(ing) > 2:
-				if ing[0].isalpha() and ing[1]== " ": 	#Remove single characters if it appears in very front of word
+				if ing[0].isalpha() and ing[1]== " ": 	
 					ing = ing[1:]
-				if ing[len(ing)-1].isalpha() and ing[len(ing)-2] == " ": 	#Remove single characters if it appears in very end of word
+				#Remove single characters if it appears in very end of ing
+				if ing[len(ing)-1].isalpha() and ing[len(ing)-2] == " ": 	
 					ing = ing[:-2]
 
-			get_rid = ["and ","ml ","or ","to ","an ","with "]
+			#Remove any words in the get_rid list that appear in very front of ing
 			for g in get_rid:
 				if ing.find(g) == 0:								
-					ing = ing[(len(g)-1):]		#e.g. Remove 'and' if it appears in very front of word
+					ing = ing[(len(g)-1):]		#e.g. Remove 'and' if it appears in very front of ing
 
+			#Remove ' a '
 			if ' a ' in ing:	
-				ing = re.sub(' a ', ' ', ing) 	#Remove ' a '
+				ing = re.sub(' a ', ' ', ing) 
+			#Remove ' g '
 			if ' g ' in ing:	
-				ing = re.sub(' g ', ' ', ing) 	#Remove ' g '
-			if ' and ' in ing:					#Split words if they have 'and', such as 'mayo and mustard and ketchup'
+				ing = re.sub(' g ', ' ', ing) 	
+			#Split words if they have 'and', such as 'mayo and mustard and ketchup'
+			if ' and ' in ing:					
 				ing = ing.split(' and ')
 				for a in range(len(ing)):
 					queries.append((ing[a].strip(),ingr))
@@ -218,12 +234,23 @@ def get_ingr_from_db():
 					queries.append((ing[a].strip(),ingr)) 					
 			else:
 				if ing == "":					#If algorithm failed and gives a blank value
-					print #ingr
+					print ingr
 				else:
 					ing = " ".join(ing.split())
 					queries.append((ing.strip(),ingr))
 
-	#Remove duplicate ing from list 	**Compares only the first element of this 2 Dimensional Tuple
+	return queries
+
+def get_ingr_from_db():
+
+	#Retrieve ingredients from database
+	conn = sqlite3.connect('recipe.db')
+	raw_data = conn.execute("SELECT recipe_ingredient from RECIPE")
+
+	#Store the ingredient names into a list of 2 dimensional tuples
+	queries = process_data(raw_data)
+
+	#Remove duplicate ingredient names from list 	**Compares only the first element of this 2 Dimensional Tuple
 	queries = dict((x[0], x) for x in queries).values()
 
 	conn.close()
@@ -391,12 +418,10 @@ def any_word_appear_alg(soup_1,que_words):
 
 	return found_it
 
-
-def FIND_NUTRIENT(queries):
+def extract_nutrient(queries):
 
 	global found_it, temp_index, index, text_length
 
-	
 	#Stage 1 input the queries into a simple text file and make sure queries are not duplicated in text file
 	file = open("Ingredient.txt", "r")
 	for line in file:  
@@ -573,7 +598,9 @@ def FIND_NUTRIENT(queries):
 
 	#GET NUTRIENT USING API
 	for n in range(len(ndbno)):
-		url = "https://api.nal.usda.gov/ndb/nutrients/?format=json&api_key=YOUR_KEY&nutrients=208&nutrients=204&nutrients=606&nutrients=601&nutrients=307&nutrients=205&nutrients=291&nutrients=269&nutrients=203&nutrients=318&nutrients=401&nutrients=301&nutrients=303&ndbno=" + ndbno[n][1]
+		url = "https://api.nal.usda.gov/ndb/nutrients/?format=json&api_key=YOUR_KEY \
+				&nutrients=208&nutrients=204&nutrients=606&nutrients=601&nutrients=307&nutrients=205&nutrients=291 \
+				&nutrients=269&nutrients=203&nutrients=318&nutrients=401&nutrients=301&nutrients=303&ndbno=" + ndbno[n][1]
 		response = urllib2.urlopen(url)
 		data = json.loads(response.read())
 
@@ -622,11 +649,13 @@ def FIND_NUTRIENT(queries):
 	input_nutr_data_into_db(queries,ndbno)
 	
 
-def UPDATE_NUTRIENT(query, correct_ndbno_num):
+def update_nutrient_data(query, correct_ndbno_num):
 	conn = sqlite3.connect('nutrient.db')
 
 	#Get the JSON data
-	url = "https://api.nal.usda.gov/ndb/nutrients/?format=json&api_key=YOUR_KEY&nutrients=208&nutrients=204&nutrients=606&nutrients=601&nutrients=307&nutrients=205&nutrients=291&nutrients=269&nutrients=203&nutrients=318&nutrients=401&nutrients=301&nutrients=303&ndbno=" + correct_ndbno_num
+	url = "https://api.nal.usda.gov/ndb/nutrients/?format=json&api_key=YOUR_KEY \
+			&nutrients=208&nutrients=204&nutrients=606&nutrients=601&nutrients=307&nutrients=205&nutrients=291 \
+			&nutrients=269&nutrients=203&nutrients=318&nutrients=401&nutrients=301&nutrients=303&ndbno=" + correct_ndbno_num
 	response = urllib2.urlopen(url)
 	data = json.loads(response.read())
 
@@ -663,26 +692,23 @@ def UPDATE_NUTRIENT(query, correct_ndbno_num):
 	conn.commit()
 	conn.close()
 	
-
-
 if __name__ == "__main__":
 	
 	#Insert Nutrient Data
-	'''
-	#Retrieving ingredients from recipe database
+
+	#retrieve ingredients from recipe database
 	queries = get_ingr_from_db()
 	
-	#Find the Nutrients
-	FIND_NUTRIENT(queries)
-	'''
+	#find the nutrients, store it into database
+	extract_nutrient(queries)
 
 	#Manual Updates of Nutrient Database
 	'''
-	UPDATE_NUTRIENT("brown sugar", "19334")	#First Parameter = Ingredient_Name, Second Paramenter = Ndbno number that you want
-	UPDATE_NUTRIENT("white vinegar","45137968") 
-	UPDATE_NUTRIENT("white button","11260") 
-	UPDATE_NUTRIENT("sweet apple","09003")
-	UPDATE_NUTRIENT("chicken","05332")
-	UPDATE_NUTRIENT("natural yogurt","01295")
-	UPDATE_NUTRIENT("corn starch","45168375")
+	update_nutrient_data("brown sugar", "19334")	#First Parameter = Ingredient_Name, Second Paramenter = Ndbno number that you want
+	update_nutrient_data("white vinegar","45137968") 
+	update_nutrient_data("white button","11260") 
+	update_nutrient_data("sweet apple","09003")
+	update_nutrient_data("chicken","05332")
+	update_nutrient_data("natural yogurt","01295")
+	update_nutrient_data("corn starch","45168375")
 	''' 
